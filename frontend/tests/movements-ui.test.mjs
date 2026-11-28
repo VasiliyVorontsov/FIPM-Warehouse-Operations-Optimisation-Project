@@ -112,9 +112,10 @@ test('Пункт "Все содержимое ячейки" стоит перв�
     assert.match(js, /movementMoveAll = true; movementStock = null; movementQuantity = 0; movementDestination = null; setMode\('move-target'\);/);
 });
 
-test('Перемещение "всего содержимого ячейки" переносит каждую позицию и восстанавливает обычный режим при смене выбора', () => {
+test('Перенос всей ячейки отправляет один пакетный запрос и сохраняет обычный режим при смене выбора', () => {
     assert.match(js, /const label = movementMoveAll \? 'Товар: всё содержимое ячейки' : `Товар: \$\{movementStock\.name\} · \$\{movementQuantity\} шт\.`;/);
-    assert.match(js, /for \(const item of cellItems\(movementSelected\)\) \{\s*\n\s*await callBackend\('MoveWarehouseStock', item\.id, item\.count, movementDestination\.x, movementDestination\.y\);/);
+    assert.match(js, /submitMovement\('Содержимое ячейки перемещено\.', 'MoveWarehouseCell', source, x, y\)/);
+    assert.doesNotMatch(js, /await callBackend\('MoveWarehouseStock', item\.id/);
     assert.match(js, /quantity\.hidden = false; all\.hidden = false;/);
     assert.match(js, /movementMoveAll = false; movementStock = item; movementQuantity = amount; movementDestination = null; setMode\('move-target'\);/);
 });

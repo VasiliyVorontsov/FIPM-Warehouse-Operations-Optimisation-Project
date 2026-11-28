@@ -363,12 +363,24 @@ type WarehouseCell struct {
 	Y int `json:"y"`
 }
 
+// MoveWarehouseCell переносит всё содержимое ячейки одной транзакцией.
+func (s *DBService) MoveWarehouseCell(source WarehouseCell, destinationX, destinationY int) error {
+	if source.X == destinationX && source.Y == destinationY {
+		return errors.New("исходная и целевая ячейки совпадают")
+	}
+	return s.moveWarehouseCells([]WarehouseCell{source}, destinationX, destinationY)
+}
+
 // MergeWarehouseCells переносит все товары из исходных ячеек в целевую.
 // Целевая ячейка может совпадать с одной из исходных или быть любой другой.
 func (s *DBService) MergeWarehouseCells(sources []WarehouseCell, destinationX, destinationY int) error {
 	if len(sources) < 2 {
 		return errors.New("для объединения выберите исходную ячейку и хотя бы одну дополнительную")
 	}
+	return s.moveWarehouseCells(sources, destinationX, destinationY)
+}
+
+func (s *DBService) moveWarehouseCells(sources []WarehouseCell, destinationX, destinationY int) error {
 	if err := validateWarehouseCell(destinationX, destinationY); err != nil {
 		return err
 	}

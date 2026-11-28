@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -377,4 +378,46 @@ func TestWarehouseMoveAndMergeKeepProductTotals(t *testing.T) {
 	if err := s.MoveWarehouseStock(locations[0].ID, 1, 9, 9); err == nil {
 		t.Fatal("move accepted invalid destination")
 	}
+}
+
+func TestMoveWarehouseCellRollsBackOnSecondProduct(t *testing.T) {
+	s, _ := testOrderStore(t)
+	source := WarehouseCell{X: 1, Y: 1}
+	if err := s.MergeWarehouseCells([]WarehouseCell{source, {X: 2, Y: 1}}, source.X, source.Y); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.GetWarehouseStocks()
+	if err != nil || len(before) != 2 {
+		t.Fatalf("initial stocks=%+v err=%v", before, err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER reject_second_move BEFORE INSERT ON warehouse_stock
+		WHEN NEW.x=3 AND NEW.y=1 AND EXISTS (SELECT 1 FROM warehouse_stock WHERE x=3 AND y=1)
+		BEGIN SELECT RAISE(ABORT, 'second product rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MoveWarehouseCell(source, 3, 1); err == nil || !strings.Contains(err.Error(), "second product rejected") {
+		t.Fatalf("expected the second insert to fail, got %v", err)
+	}
+	afterFailure, err := s.GetWarehouseStocks()
+	if err != nil || !reflect.DeepEqual(before, afterFailure) {
+		t.Fatalf("failed move changed stocks: before=%+v after=%+v err=%v", before, afterFailure, err)
+	}
+
+	if _, err := s.db.Exec("DROP TRIGGER reject_second_move"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MoveWarehouseCell(source, 3, 1); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.GetWarehouseStocks()
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("moved stocks=%+v err=%v", after, err)
+	}
+	for i, stock := range after {
+		if stock.X != 3 || stock.Y != 1 || stock.ProductID != before[i].ProductID ||
+			stock.Count != before[i].Count || stock.ReceivedAt != before[i].ReceivedAt {
+			t.Fatalf("incorrectly moved stock: %+v", stock)
+		}
+	}
+	checkWarehouseTotals(t, s)
 }

@@ -16,6 +16,7 @@ let movementHighlightedProduct = null;
 let movementShowItems = false;
 let movementDestShowItems = false;
 let movementVersion = 0;
+let movementSubmitting = false;
 
 const cellItems = (cell) => cell ? movementStocks.filter((item) => item.x === cell.x && item.y === cell.y) : [];
 const uniqueProducts = () => [...new Map(movementStocks.map((item) => [item.productId, item])).values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
@@ -61,7 +62,7 @@ function renderGrid() {
         movementMergeSources.slice(1).forEach((c) => marked.add(`${c.x}:${c.y}`));
     }
     // During the first movement step the map is deliberately non-interactive.
-    const disabled = movementMode === 'move-choose';
+    const disabled = movementMode === 'move-choose' || movementSubmitting;
     const highlightVariant = movementMode === 'merge-select' || movementMode === 'merge-target' ? 'info' : 'success';
     movementGrid.render(movementStocks, movementSelected, disabled, marked, highlightVariant,
         movementDestination, movementMode === 'merge-select');
@@ -176,6 +177,7 @@ function renderActions() {
     byId('movements-find').disabled = operationActive || !byId('movements-product').value;
     byId('movements-back').disabled = operationActive;
     byId('movements-reload').disabled = operationActive;
+    byId('movements-cancel').disabled = movementSubmitting;
     if (!movementSelected || movementMode === 'browse') {
         if (movementSelected && cellItems(movementSelected).length) {
             root.append(button('Переместить товар', 'btn-primary w-100 mb-2', () => {
@@ -246,7 +248,7 @@ function renderActions() {
         root.append(paragraph('Выберите ячейку назначения на карте.', 'small text-body-secondary mb-2'));
         if (movementDestination) {
             root.append(paragraph(`Куда: ${cellName(movementDestination.x, movementDestination.y)}`, 'text-danger fw-bold mb-2'));
-            root.append(button('Подтвердить перемещение', 'btn-success w-100', confirmMove));
+            root.append(button('Подтвердить перемещение', 'btn-success w-100', confirmMove, movementSubmitting));
         }
     } else if (movementMode === 'merge-select') {
         root.append(paragraph(`Исходная ячейка: ${cellName(movementSelected.x, movementSelected.y)}. Выберите ещё непустые ячейки.`, 'fw-semibold'));
@@ -262,7 +264,7 @@ function renderActions() {
         root.append(paragraph('Выберите ячейку назначения на карте.', 'small text-body-secondary mt-2 mb-2'));
         if (movementDestination) {
             root.append(paragraph(`Назначение: ${cellName(movementDestination.x, movementDestination.y)}`, 'text-danger fw-bold mb-2'));
-            root.append(button('Подтвердить объединение', 'btn-success w-100', confirmMerge));
+            root.append(button('Подтвердить объединение', 'btn-success w-100', confirmMerge, movementSubmitting));
         }
     }
 }
@@ -294,33 +296,31 @@ function resetOperation() {
     byId('movements-cancel').hidden = true;
     render();
 }
-async function confirmMove() {
-    if (!movementDestination) return;
+function confirmMove() {
+    const { x, y } = movementDestination;
     if (movementMoveAll) {
-        if (!movementSelected) return;
-        try {
-            for (const item of cellItems(movementSelected)) {
-                await callBackend('MoveWarehouseStock', item.id, item.count, movementDestination.x, movementDestination.y);
-            }
-            await loadMovements();
-            setMovementStatus('Товар успешно перемещён.', 'success');
-        } catch (error) { showError(byId('movements-status'), error); }
-        return;
+        const source = { x: movementSelected.x, y: movementSelected.y };
+        return submitMovement('Содержимое ячейки перемещено.', 'MoveWarehouseCell', source, x, y);
     }
-    if (!movementStock) return;
-    try {
-        await callBackend('MoveWarehouseStock', movementStock.id, movementQuantity, movementDestination.x, movementDestination.y);
-        await loadMovements();
-        setMovementStatus('Товар успешно перемещён.', 'success');
-    } catch (error) { showError(byId('movements-status'), error); }
+    return submitMovement('Товар успешно перемещён.', 'MoveWarehouseStock', movementStock.id, movementQuantity, x, y);
 }
-async function confirmMerge() {
-    if (!movementDestination || movementMergeSources.length < 2) return;
+function confirmMerge() {
+    return submitMovement('Ячейки успешно объединены.', 'MergeWarehouseCells',
+        movementMergeSources, movementDestination.x, movementDestination.y);
+}
+async function submitMovement(message, method, ...args) {
+    movementSubmitting = true;
+    render();
     try {
-        await callBackend('MergeWarehouseCells', movementMergeSources, movementDestination.x, movementDestination.y);
+        await callBackend(method, ...args);
         await loadMovements();
-        setMovementStatus('Ячейки успешно объединены.', 'success');
-    } catch (error) { showError(byId('movements-status'), error); }
+        setMovementStatus(message, 'success');
+    } catch (error) {
+        showError(byId('movements-status'), error);
+    } finally {
+        movementSubmitting = false;
+        render();
+    }
 }
 function setProductChoice(id, name = '') {
     const picker = byId('movements-product');
